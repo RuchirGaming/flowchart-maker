@@ -41,14 +41,14 @@ label {
     color: #606266;
     font-weight: 600;
 }
-input, select, button {
+input, select, button, textarea {
     padding: 10px;
     border: 1px solid #dcdfe6;
     border-radius: 4px;
     font-size: 0.9rem;
     outline: none;
 }
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
     border-color: #409eff;
 }
 button {
@@ -124,9 +124,36 @@ button {
     font-size: 40px;
     color: #333;
 }
-.node.arrow span {
-    transition: transform 0.2s ease;
+.node.line {
+    min-width: 80px;
+    min-height: 20px;
+    background-color: transparent;
+    box-shadow: none;
+    border: none;
+}
+.line-graphic {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background-color: #333333;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+.node span {
     display: inline-block;
+    outline: none;
+    padding: 2px 4px;
+    border-radius: 2px;
+}
+.node span[contenteditable="true"]:focus {
+    background-color: rgba(64, 158, 255, 0.15);
+    box-shadow: 0 0 0 1px #409eff;
+    cursor: text;
+}
+.node.arrow span, .node.line span {
+    transition: transform 0.2s ease;
 }
 .delete-btn {
     position: absolute;
@@ -204,9 +231,20 @@ button {
             <option value="process">Process (Rectangle)</option>
             <option value="decision">Decision (Diamond)</option>
             <option value="arrow">Arrow (Connector)</option>
+            <option value="line">Line Segment</option>
         </select>
     </div>
     <button class="btn-add" id="add-node-btn">Add Node</button>
+    
+    <div class="form-group" style="margin-top: 10px;">
+        <label for="json-input">Import / Export JSON Data</label>
+        <textarea id="json-input" placeholder="Paste flowchart configuration JSON array here..." rows="5" style="font-family: monospace; font-size: 0.75rem; resize: vertical;"></textarea>
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+            <button id="import-json-btn" style="flex: 1; padding: 8px; font-size: 0.8rem; background-color: #909399; color: white; border: none; border-radius: 4px;">Import</button>
+            <button id="export-json-btn" style="flex: 1; padding: 8px; font-size: 0.8rem; background-color: #e6a23c; color: white; border: none; border-radius: 4px;">Get JSON</button>
+        </div>
+    </div>
+
     <canvas id="hidden-export-canvas" style="display:none;"></canvas>
     <button class="btn-export" id="export-btn">Export Transparent PNG</button>
 </div>
@@ -219,6 +257,9 @@ const addNodeBtn = document.getElementById('add-node-btn');
 const exportBtn = document.getElementById('export-btn');
 const nodeTextInput = document.getElementById('node-text');
 const nodeTypeSelect = document.getElementById('node-type');
+const jsonInput = document.getElementById('json-input');
+const importJsonBtn = document.getElementById('import-json-btn');
+const exportJsonBtn = document.getElementById('export-json-btn');
 
 let activeNode = null;
 let offsetX = 0;
@@ -238,6 +279,7 @@ function saveCanvas() {
         if (node.classList.contains('start-end')) type = 'start-end';
         if (node.classList.contains('decision')) type = 'decision';
         if (node.classList.contains('arrow')) type = 'arrow';
+        if (node.classList.contains('line')) type = 'line';
 
         nodesData.push({
             type: type,
@@ -278,19 +320,50 @@ function createNode(type, text, left, top, width, height, fontSize, rotation) {
         svg.innerHTML = `<polygon points="50,2 98,50 50,98 2,50" fill="#ffffff" stroke="#e6a23c" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
         node.appendChild(svg);
     }
+
+    if (type === 'line') {
+        const lineDiv = document.createElement('div');
+        lineDiv.classList.add('line-graphic');
+        node.appendChild(lineDiv);
+    }
     
     const textSpan = document.createElement('span');
     textSpan.textContent = text;
     textSpan.style.zIndex = "1";
+    textSpan.contentEditable = "true";
+    
+    textSpan.addEventListener('focus', () => {
+        setTimeout(() => {
+            const range = document.createRange();
+            range.selectNodeContents(textSpan);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }, 10);
+    });
+
+    textSpan.addEventListener('input', () => {
+        saveCanvas();
+    });
+
+    textSpan.addEventListener('blur', () => {
+        window.getSelection().removeAllRanges();
+        saveCanvas();
+    });
+
     node.appendChild(textSpan);
 
     let currentRotation = parseFloat(rotation || 0);
     node.dataset.rotation = currentRotation;
-    if (type === 'arrow' && currentRotation) {
+    if ((type === 'arrow' || type === 'line') && currentRotation) {
         textSpan.style.transform = `rotate(${currentRotation}deg)`;
+        if (type === 'line') {
+            const lineGraphic = node.querySelector('.line-graphic');
+            if (lineGraphic) lineGraphic.style.transform = `translateY(-50%) rotate(${currentRotation}deg)`;
+        }
     }
 
-    if (type === 'arrow') {
+    if (type === 'arrow' || type === 'line') {
         const rotateBtn = document.createElement('button');
         rotateBtn.innerHTML = '↻';
         rotateBtn.classList.add('rotate-btn');
@@ -298,6 +371,10 @@ function createNode(type, text, left, top, width, height, fontSize, rotation) {
             currentRotation += 45;
             textSpan.style.transform = `rotate(${currentRotation}deg)`;
             node.dataset.rotation = currentRotation;
+            if (type === 'line') {
+                const lineGraphic = node.querySelector('.line-graphic');
+                if (lineGraphic) lineGraphic.style.transform = `translateY(-50%) rotate(${currentRotation}deg)`;
+            }
             saveCanvas();
         });
         node.appendChild(rotateBtn);
@@ -318,7 +395,7 @@ function createNode(type, text, left, top, width, height, fontSize, rotation) {
         e.stopPropagation();
         activeResizeNode = node;
         node.style.minWidth = '30px';
-        node.style.minHeight = '30px';
+        node.style.minHeight = '20px';
         startWidth = node.offsetWidth;
         startHeight = node.offsetHeight;
         startX = e.clientX;
@@ -337,6 +414,7 @@ function loadCanvas() {
     if (!saved) return;
     try {
         const nodesData = JSON.parse(saved);
+        canvas.innerHTML = '';
         nodesData.forEach(data => {
             createNode(data.type, data.text, data.left, data.top, data.width, data.height, data.fontSize, data.rotation);
         });
@@ -345,13 +423,66 @@ function loadCanvas() {
     }
 }
 
+importJsonBtn.addEventListener('click', () => {
+    const rawValue = jsonInput.value.trim();
+    if (!rawValue) {
+        alert("Please paste some JSON data first!");
+        return;
+    }
+    try {
+        const nodesData = JSON.parse(rawValue);
+        if (!Array.isArray(nodesData)) {
+            alert("JSON must be a valid list/array of items!");
+            return;
+        }
+        canvas.innerHTML = '';
+        nodesData.forEach(data => {
+            createNode(data.type, data.text || '', data.left, data.top, data.width, data.height, data.fontSize, data.rotation);
+        });
+        saveCanvas();
+    } catch (err) {
+        alert("Oops! Invalid JSON syntax. Check the commas and brackets.");
+    }
+});
+
+exportJsonBtn.addEventListener('click', () => {
+    const nodesData = [];
+    canvas.querySelectorAll('.node').forEach(node => {
+        let type = 'process';
+        if (node.classList.contains('start-end')) type = 'start-end';
+        if (node.classList.contains('decision')) type = 'decision';
+        if (node.classList.contains('arrow')) type = 'arrow';
+        if (node.classList.contains('line')) type = 'line';
+
+        nodesData.push({
+            type: type,
+            text: node.querySelector('span').textContent,
+            left: node.style.left,
+            top: node.style.top,
+            width: node.style.width,
+            height: node.style.height,
+            fontSize: node.style.fontSize,
+            rotation: node.dataset.rotation || '0'
+        });
+    });
+    jsonInput.value = JSON.stringify(nodesData, null, 2);
+});
+
 canvas.addEventListener('mousedown', (e) => {
     const targetNode = e.target.closest('.node');
     if (targetNode && !e.target.classList.contains('delete-btn') && !e.target.classList.contains('rotate-btn') && !e.target.classList.contains('resize-handle')) {
+        if (e.target.tagName === 'SPAN' && document.activeElement === e.target) {
+            return;
+        }
         activeNode = targetNode;
         offsetX = e.clientX - activeNode.offsetLeft;
         offsetY = e.clientY - activeNode.offsetTop;
         activeNode.style.zIndex = 1000;
+        
+        if (e.target.tagName === 'SPAN') {
+            e.preventDefault();
+            e.target.focus();
+        }
     }
 });
 
@@ -361,7 +492,7 @@ document.addEventListener('mousemove', (e) => {
         let dy = e.clientY - startY;
         
         let newWidth = Math.max(30, startWidth + dx);
-        let newHeight = Math.max(30, startHeight + dy);
+        let newHeight = Math.max(20, startHeight + dy);
         
         activeResizeNode.style.width = newWidth + 'px';
         activeResizeNode.style.height = newHeight + 'px';
@@ -402,6 +533,8 @@ addNodeBtn.addEventListener('click', () => {
     
     if (type === 'arrow' && (!text || text === 'Step')) {
         text = '➔';
+    } else if (type === 'line' && (!text || text === 'Step')) {
+        text = '';
     } else if (!text) {
         text = 'Step';
     }
@@ -419,8 +552,8 @@ exportBtn.addEventListener('click', () => {
     
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach(node => {
-        const left = parseFloat(node.style.left);
-        const top = parseFloat(node.style.top);
+        const left = parseFloat(node.style.left) || 0;
+        const top = parseFloat(node.style.top) || 0;
         const width = node.offsetWidth;
         const height = node.offsetHeight;
         if (left < minX) minX = left;
@@ -429,7 +562,7 @@ exportBtn.addEventListener('click', () => {
         if (top + height > maxY) maxY = top + height;
     });
     
-    const padding = 20;
+    const padding = 40;
     const exportWidth = (maxX - minX) + (padding * 2);
     const exportHeight = (maxY - minY) + (padding * 2);
     const expCanvas = document.getElementById('hidden-export-canvas');
@@ -440,11 +573,12 @@ exportBtn.addEventListener('click', () => {
     ctx.clearRect(0, 0, exportWidth, exportHeight);
     
     nodes.forEach(node => {
-        const x = parseFloat(node.style.left) - minX + padding;
-        const y = parseFloat(node.style.top) - minY + padding;
+        const x = (parseFloat(node.style.left) || 0) - minX + padding;
+        const y = (parseFloat(node.style.top) || 0) - minY + padding;
         const w = node.offsetWidth;
         const h = node.offsetHeight;
         const text = node.querySelector('span').textContent;
+        const rotation = parseFloat(node.dataset.rotation || 0);
         
         ctx.save();
         ctx.lineWidth = 2;
@@ -494,10 +628,25 @@ exportBtn.addEventListener('click', () => {
             ctx.font = `500 ${fontSize} 'Segoe UI'`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            const rotation = parseFloat(node.dataset.rotation || 0);
             ctx.translate(x + w / 2, y + h / 2);
             ctx.rotate(rotation * Math.PI / 180);
             ctx.fillText(text, 0, 0);
+        } else if (node.classList.contains('line')) {
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 2;
+            ctx.translate(x + w / 2, y + h / 2);
+            ctx.rotate(rotation * Math.PI / 180);
+            ctx.beginPath();
+            ctx.moveTo(-w / 2, 0);
+            ctx.lineTo(w / 2, 0);
+            ctx.stroke();
+            if (text) {
+                ctx.fillStyle = '#333333';
+                ctx.font = "500 14px 'Segoe UI'";
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(text, 0, -4);
+            }
         }
         
         ctx.restore();
